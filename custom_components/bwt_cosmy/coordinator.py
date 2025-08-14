@@ -8,24 +8,40 @@ from typing import Optional
 from homeassistant.core import HomeAssistant
 from homeassistant.components import bluetooth
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.dispatcher import async_dispatcher_send, async_dispatcher_connect
-from homeassistant.helpers import device_registry as dr  # only for typing hints if needed
+from homeassistant.helpers.dispatcher import (
+    async_dispatcher_send,
+    async_dispatcher_connect,
+)
 
 from bleak_retry_connector import establish_connection, BleakClientWithServiceCache
 
 from .const import (
-    SERVICE_UUID, CHAR_WRITE, CHAR_NOTIFY,
-    CMD_ON, CMD_OFF, CMD_STAT,
-    SIGNAL_STATE_FMT, SIGNAL_MINUTES_FMT, SIGNAL_REFRESH_FMT,
+    SERVICE_UUID,  # not used explicitly but kept for reference
+    CHAR_WRITE,
+    CHAR_NOTIFY,
+    CMD_ON,
+    CMD_OFF,
+    CMD_STAT,
+    SIGNAL_STATE_FMT,
+    SIGNAL_MINUTES_FMT,
+    SIGNAL_REFRESH_FMT,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-REFRESH_INTERVAL = timedelta(seconds=30)  # periodic (re)connect + status
+# Periodic reconnection + status polling interval
+REFRESH_INTERVAL = timedelta(seconds=30)
+# Wait time after sending CMD_STAT to collect notify frames
 NOTIFY_WAIT = 1.0
 
+
 class CosmyCoordinator:
-    """Centralizes BLE connection, reconnection and status parsing for Cosmy."""
+    """Centralizes BLE (re)connection and status parsing for the Cosmy robot.
+
+    Thread-safety: all HA state updates and dispatcher signals are emitted
+    from the Home Assistant event loop. Bleak callbacks bounce to the loop
+    using hass.loop.call_soon_threadsafe.
+    """
 
     def __init__(self, hass: HomeAssistant, address: str, name: str) -> None:
         self.hass = hass
@@ -40,27 +56,29 @@ class CosmyCoordinator:
         self._lock = asyncio.Lock()
         self._unsub_timer = None
 
-        # signals for this device
+        # Per-device dispatcher signals
         key = self.address.replace(":", "").lower()
-        self.sig_state = SIGNAL_STATE_FMT.format(addr=key)
-        self.sig_minutes = SIGNAL_MINUTES_FMT.format(addr=key)
-        self.sig_refresh = SIGNAL_REFRESH_FMT.format(addr=key)
+        self.sig_state = SIGNAL_STATE_FMT.format(addr=key)     # payload: (cleaning: Optional[bool], minutes: int)
+        self.sig_minutes = SIGNAL_MINUTES_FMT.format(addr=key) # payload: (minutes: int)
+        self.sig_refresh = SIGNAL_REFRESH_FMT.format(addr=key) # sensor requests refresh
         self._unsub_refresh = None
 
+    # ---------------- Lifecycle ----------------
     async def async_start(self) -> None:
-        """Start periodic refresh and subscribe to on-demand refresh."""
-        # on-demand refresh from sensor
+        """Start periodic refresh and register on-demand refresh listener."""
+        # On-demand refresh (requested by entities)
         self._unsub_refresh = async_dispatcher_connect(
             self.hass, self.sig_refresh, self._on_refresh_request
         )
-        # periodic refresh
+        # Periodic reconnection/status
         self._unsub_timer = async_track_time_interval(
             self.hass, self._scheduled_refresh, REFRESH_INTERVAL
         )
-        # initial refresh now
+        # Initial refresh now
         await self.async_refresh()
 
     async def async_stop(self) -> None:
+        """Stop timers and close BLE connection."""
         if self._unsub_timer:
             self._unsub_timer()
             self._unsub_timer = None
@@ -79,17 +97,23 @@ class CosmyCoordinator:
         await self.async_refresh()
 
     def _on_refresh_request(self) -> None:
-        # Run from dispatcher (sensor asks for a refresh)
+        """Dispatcher callback from entities asking for a refresh."""
         self.hass.async_create_task(self.async_refresh())
 
-    # ---------- BLE helpers ----------
+    # ---------------- BLE helpers ----------------
     async def _ensure_client(self) -> Optional[BleakClientWithServiceCache]:
+        """Ensure a connected Bleak client (via HA Bluetooth proxy)."""
         if self._client and self._client.is_connected:
             return self._client
 
-        ble_device = bluetooth.async_ble_device_from_address(self.hass, self.address, connectable=True)
+        # Try connectable first; fallback to non-connectable adverts from proxies
+        ble_device = bluetooth.async_ble_device_from_address(
+            self.hass, self.address, connectable=True
+        )
         if ble_device is None:
-            ble_device = bluetooth.async_ble_device_from_address(self.hass, self.address, connectable=False)
+            ble_device = bluetooth.async_ble_device_from_address(
+                self.hass, self.address, connectable=False
+            )
 
         if ble_device is None:
             self.available = False
@@ -97,17 +121,21 @@ class CosmyCoordinator:
             return None
 
         try:
+            # Use explicit keyword args for HA recent versions
             self._client = await establish_connection(
                 client_class=BleakClientWithServiceCache,
                 device=ble_device,
                 name=self.address,
             )
+            # Disconnection callback -> bounce to HA loop
             try:
                 self._client.set_disconnected_callback(
                     lambda _c: self.hass.loop.call_soon_threadsafe(self._on_disconnect)
                 )
             except Exception:
+                # Not all backends support it; not fatal
                 pass
+
             self.available = True
             _LOGGER.debug("[bwt_cosmy] GATT connected -> %s", self.address)
             return self._client
@@ -117,48 +145,59 @@ class CosmyCoordinator:
             return None
 
     def _on_disconnect(self) -> None:
+        """Runs in HA event loop (scheduled via call_soon_threadsafe)."""
         _LOGGER.debug("[bwt_cosmy] GATT disconnected -> %s", self.address)
         self._client = None
         self.available = False
         self._push_update()
 
-    # ---------- notify parsing ----------
+    # ---------------- Notify handling (thread-safe) ----------------
+    def _on_notify(self, _handle: int, payload: bytearray) -> None:
+        """Bleak thread callback -> bounce into HA loop safely."""
+        data = bytes(payload)
+        self.hass.loop.call_soon_threadsafe(self._handle_notify, data)
+
     @staticmethod
     def _is_ack_frame(data: bytes) -> bool:
+        """Filter short ACK frames that are not status frames."""
         if len(data) in (3, 4) and data[:2] == b"\x00\x51":
             return True
         if len(data) <= 12 and (data.endswith(b"\x51\x0c") or data.endswith(b"\x51\x0c\xfd")):
             return True
         return False
 
-    def _parse_status(self, data: bytes) -> bool | None:
-        # 20 bytes, header ffa53a1384 ; bit7 of data[5] = cleaning ; minutes LE [6:8]
+    def _handle_notify(self, data: bytes) -> None:
+        """Runs in HA event loop; parse and publish status."""
+        if self._is_ack_frame(data):
+            _LOGGER.debug("[bwt_cosmy] ACK ignored: %s", data.hex())
+            return
+        self._parse_status(data)
+        self.available = True
+        self._push_update()
+
+    def _parse_status(self, data: bytes) -> Optional[bool]:
+        """Parse 20-byte status frame: header ffa53a1384, bit7 at [5] is cleaning, minutes is LE [6:8]."""
         if len(data) == 20 and data[:5] == bytes.fromhex("ffa53a1384"):
             cleaning = bool(data[5] & 0x80)
             self.cleaning = cleaning
             self.minutes = int.from_bytes(data[6:8], "little") if cleaning else 0
-            _LOGGER.debug("[bwt_cosmy] Status: %s, minutes=%d", "CLEANING" if cleaning else "IDLE", self.minutes)
+            _LOGGER.debug(
+                "[bwt_cosmy] Status: %s, minutes=%d",
+                "CLEANING" if cleaning else "IDLE",
+                self.minutes,
+            )
             return cleaning
         _LOGGER.debug("[bwt_cosmy] Unexpected frame: %s", data.hex())
         return None
 
-    def _on_notify(self, _handle: int, payload: bytearray) -> None:
-        b = bytes(payload)
-        if self._is_ack_frame(b):
-            _LOGGER.debug("[bwt_cosmy] ACK ignored: %s", b.hex())
-            return
-        self._parse_status(b)
-        self.available = True
-        self._push_update()
-
     def _push_update(self) -> None:
-        # push minutes and state to entities
+        """Emit dispatcher signals (runs in HA loop)."""
         async_dispatcher_send(self.hass, self.sig_minutes, self.minutes)
         async_dispatcher_send(self.hass, self.sig_state, self.cleaning, self.minutes)
 
-    # ---------- public ops ----------
+    # ---------------- Public operations ----------------
     async def async_refresh(self) -> None:
-        """Attempt (re)connection and query status."""
+        """Attempt (re)connection and query status; safe against concurrent calls."""
         if self._lock.locked():
             _LOGGER.debug("[bwt_cosmy] refresh already in progress -> skip")
             return
@@ -174,7 +213,7 @@ class CosmyCoordinator:
                 await asyncio.sleep(NOTIFY_WAIT)
                 await client.stop_notify(CHAR_NOTIFY)
                 self.available = True
-                # if no notify came, still push current state
+                # If no notify arrived, still push current cached state
                 self._push_update()
             except Exception as e:
                 self.available = False
@@ -188,6 +227,7 @@ class CosmyCoordinator:
                 self._push_update()
 
     async def async_start_cleaning(self) -> None:
+        """Send ON command; optimistic state updated immediately, then confirmed by status notify."""
         client = await self._ensure_client()
         if not client:
             self.available = False
@@ -195,7 +235,7 @@ class CosmyCoordinator:
             return
         try:
             await client.start_notify(CHAR_NOTIFY, self._on_notify)
-            # optimistic
+            # Optimistic UI: mark cleaning now
             self.cleaning = True
             self._push_update()
             await client.write_gatt_char(CHAR_WRITE, CMD_ON, response=True)
@@ -209,6 +249,7 @@ class CosmyCoordinator:
                 pass
 
     async def async_stop_cleaning(self) -> None:
+        """Send OFF command; optimistic state updated immediately, then confirmed by status notify."""
         client = await self._ensure_client()
         if not client:
             self.available = False
@@ -216,7 +257,7 @@ class CosmyCoordinator:
             return
         try:
             await client.start_notify(CHAR_NOTIFY, self._on_notify)
-            # optimistic
+            # Optimistic UI: mark idle now
             self.cleaning = False
             self.minutes = 0
             self._push_update()

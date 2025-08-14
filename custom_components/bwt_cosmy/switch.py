@@ -13,7 +13,7 @@ from bleak_retry_connector import establish_connection, BleakClientWithServiceCa
 
 import logging
 _LOGGER = logging.getLogger("custom_components.bwt_cosmy")
-_LOGGER.setLevel(logging.DEBUG)
+_LOGGER.info("[bwt_cosmy] Le module switch.py a été importé et chargé.")
 
 DOMAIN = "bwt_cosmy"
 

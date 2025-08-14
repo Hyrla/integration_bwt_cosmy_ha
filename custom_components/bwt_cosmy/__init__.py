@@ -1,3 +1,6 @@
+import logging
+_LOGGER = logging.getLogger("custom_components.bwt_cosmy")
+_LOGGER.info("[bwt_cosmy] Le module __init__.py a été importé et chargé.")
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.const import Platform

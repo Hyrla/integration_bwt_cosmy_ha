@@ -69,14 +69,14 @@ class BwtCosmySwitch(SwitchEntity):
     # -------- Connexion BLE robuste --------
     async def _ensure_client(self) -> Optional[BleakClientWithServiceCache]:
         if self._client and self._client.is_connected:
-            _LOGGER.debug(f"Client BLE déjà connecté pour {self._address}")
+            _LOGGER.info(f"Client BLE déjà connecté pour {self._address}")
             return self._client
 
         ble_device = bluetooth.async_ble_device_from_address(
             self.hass, self._address, connectable=True
         )
         if ble_device is None:
-            _LOGGER.warning(f"BLEDevice {self._address} introuvable ou hors de portée.")
+            _LOGGER.info(f"BLEDevice {self._address} introuvable ou hors de portée.")
             self._attr_available = False
             return None
 
@@ -91,7 +91,7 @@ class BwtCosmySwitch(SwitchEntity):
             _LOGGER.info(f"Connexion BLE réussie à {self._address}")
             return self._client
         except Exception as e:
-            _LOGGER.error(f"Impossible de se connecter à {self._address}: {e}")
+            _LOGGER.info(f"Impossible de se connecter à {self._address}: {e}")
             self._attr_available = False
             return None
 
@@ -107,16 +107,16 @@ class BwtCosmySwitch(SwitchEntity):
             is_on = bool(data[5] & 0x80)
             self._is_on = is_on
             self._minutes = int.from_bytes(data[6:8], "little") if is_on else 0
-            _LOGGER.debug(f"Notif Cosmy: état={'ON' if is_on else 'OFF'}, minutes={self._minutes}")
+            _LOGGER.info(f"Notif Cosmy: état={'ON' if is_on else 'OFF'}, minutes={self._minutes}")
             return is_on
-        _LOGGER.warning(f"Trame status inattendue: {data.hex()}")
+    _LOGGER.info(f"Trame status inattendue: {data.hex()}")
         return None
 
     def _on_notify(self, _handle: int, payload: bytearray) -> None:
         self._parse_status(bytes(payload))
         # On a reçu une notif valide → appareil dispo
         self._attr_available = True
-        _LOGGER.debug(f"Notification reçue sur {self._address}, appareil marqué disponible.")
+    _LOGGER.info(f"Notification reçue sur {self._address}, appareil marqué disponible.")
 
     # -------- API Switch --------
     @property
@@ -131,10 +131,10 @@ class BwtCosmySwitch(SwitchEntity):
         client = await self._ensure_client()
         if not client:
             self._attr_available = False
-            _LOGGER.warning(f"Impossible d'allumer Cosmy {self._address}: pas de client BLE.")
+            _LOGGER.info(f"Impossible d'allumer Cosmy {self._address}: pas de client BLE.")
             self.async_write_ha_state()
             return
-        _LOGGER.info(f"Envoi commande ON à Cosmy {self._address}")
+    _LOGGER.info(f"Envoi commande ON à Cosmy {self._address}")
         await client.write_gatt_char(CHAR_WRITE, CMD_ON, response=True)
         # Demander le statut et lire les notifs
         await client.start_notify(CHAR_NOTIFY, self._on_notify)
@@ -147,10 +147,10 @@ class BwtCosmySwitch(SwitchEntity):
         client = await self._ensure_client()
         if not client:
             self._attr_available = False
-            _LOGGER.warning(f"Impossible d'éteindre Cosmy {self._address}: pas de client BLE.")
+            _LOGGER.info(f"Impossible d'éteindre Cosmy {self._address}: pas de client BLE.")
             self.async_write_ha_state()
             return
-        _LOGGER.info(f"Envoi commande OFF à Cosmy {self._address}")
+    _LOGGER.info(f"Envoi commande OFF à Cosmy {self._address}")
         await client.write_gatt_char(CHAR_WRITE, CMD_OFF, response=True)
         await client.start_notify(CHAR_NOTIFY, self._on_notify)
         await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
@@ -163,10 +163,10 @@ class BwtCosmySwitch(SwitchEntity):
         client = await self._ensure_client()
         if not client:
             self._attr_available = False
-            _LOGGER.warning(f"Cosmy {self._address} indisponible pour update.")
+            _LOGGER.info(f"Cosmy {self._address} indisponible pour update.")
             return
         try:
-            _LOGGER.debug(f"Update: interrogation statut Cosmy {self._address}")
+            _LOGGER.info(f"Update: interrogation statut Cosmy {self._address}")
             await client.start_notify(CHAR_NOTIFY, self._on_notify)
             await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
             await asyncio.sleep(1.0)
@@ -175,7 +175,7 @@ class BwtCosmySwitch(SwitchEntity):
         except Exception as e:
             # Perte de connexion pendant l’update
             self._attr_available = False
-            _LOGGER.error(f"Erreur update BLE Cosmy {self._address}: {e}")
+            _LOGGER.info(f"Erreur update BLE Cosmy {self._address}: {e}")
             try:
                 if self._client and self._client.is_connected:
                     await self._client.disconnect()
@@ -189,4 +189,4 @@ class BwtCosmySwitch(SwitchEntity):
                 await self._client.disconnect()
                 _LOGGER.info(f"Déconnexion BLE propre de Cosmy {self._address}")
             except Exception as e:
-                _LOGGER.warning(f"Erreur lors de la déconnexion BLE Cosmy {self._address}: {e}")
+                _LOGGER.info(f"Erreur lors de la déconnexion BLE Cosmy {self._address}: {e}")

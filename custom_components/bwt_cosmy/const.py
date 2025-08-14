@@ -1,1 +1,0 @@
-DOMAIN = "bwt_cosmy"

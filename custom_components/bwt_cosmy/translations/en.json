@@ -1,0 +1,29 @@
+{
+    "title": "BWT Cosmy",
+    "config": {
+        "step": {
+            "user": {
+                "title": "Configure your Cosmy BLE device",
+                "description": "Enter the BLE address and timeout for your Cosmy device.",
+                "data": {
+                    "address": "BLE Address (e.g. AA:BB:CC:DD:EE:FF)",
+                    "timeout": "Timeout (seconds)"
+                }
+            }
+        },
+        "abort": {
+            "already_configured": "This device is already configured."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Options",
+                "description": "Adjust options for your Cosmy device.",
+                "data": {
+                    "timeout": "Timeout (seconds)"
+                }
+            }
+        }
+    }
+}

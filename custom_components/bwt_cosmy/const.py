@@ -1,0 +1,1 @@
+DOMAIN = "bwt_cosmy"

@@ -1,0 +1,17 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "BWT Cosmy",
+        "description": "Enter the robot BLE MAC address (works via Bluetooth proxies).",
+        "data": {
+          "address": "BLE address (e.g. 48:70:1E:67:3E:55)",
+          "name": "Device name"
+        }
+      }
+    },
+    "error": {
+      "invalid_address": "Invalid address"
+    }
+  }
+}

@@ -14,9 +14,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     name = entry.data.get("name") or "BWT Cosmy"
 
     coord = CosmyCoordinator(hass, address, name)
+    # Non-bloquant: démarre timers + planifie un refresh async
     await coord.async_start()
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {DATA_COORDINATOR: coord}
 
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {DATA_COORDINATOR: coord}
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

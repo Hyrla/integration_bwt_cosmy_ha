@@ -29,8 +29,9 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-REFRESH_INTERVAL = timedelta(seconds=30)  # periodic reconnect + status
-NOTIFY_WAIT = 1.0                        # wait after CMD_STAT to collect notify
+REFRESH_INTERVAL = timedelta(seconds=30)   # periodic reconnect + status
+NOTIFY_WAIT = 1.0                          # wait after CMD_STAT to collect notify
+REFRESH_TIMEOUT = 5.0                      # hard timeout on a refresh cycle
 
 
 class CosmyCoordinator:
@@ -63,14 +64,15 @@ class CosmyCoordinator:
 
     # ---------------- Lifecycle ----------------
     async def async_start(self) -> None:
-        """Start periodic refresh and register on-demand refresh listener."""
+        """Register listeners and schedule the first refresh (non-blocking)."""
         self._unsub_refresh = async_dispatcher_connect(
             self.hass, self.sig_refresh, self._on_refresh_request
         )
         self._unsub_timer = async_track_time_interval(
             self.hass, self._scheduled_refresh, REFRESH_INTERVAL
         )
-        await self.async_refresh()
+        # IMPORTANT: do NOT await BLE here — just schedule it so HA can finish booting
+        self.hass.async_create_task(self.async_refresh())
 
     async def async_stop(self) -> None:
         """Stop timers and close BLE connection."""
@@ -87,7 +89,6 @@ class CosmyCoordinator:
                 pass
         self._client = None
         self.available = False
-        # If the integration is being unloaded, consider minutes = 0
         self.minutes = 0
         self._push_update()
 
@@ -112,7 +113,6 @@ class CosmyCoordinator:
 
         if ble_device is None:
             self.available = False
-            # Out of range → present minutes as 0
             self.minutes = 0
             _LOGGER.debug("[bwt_cosmy] BLEDevice %s not found (out of range/proxy)", self.address)
             return None
@@ -145,7 +145,6 @@ class CosmyCoordinator:
         _LOGGER.debug("[bwt_cosmy] GATT disconnected -> %s", self.address)
         self._client = None
         self.available = False
-        # When disconnected, we expose 0 minute remaining
         self.minutes = 0
         self._push_update()
 
@@ -178,7 +177,6 @@ class CosmyCoordinator:
         if len(data) == 20 and data[:5] == bytes.fromhex("ffa53a1384"):
             cleaning = bool(data[5] & 0x80)
             self.cleaning = cleaning
-            # When idle, always report 0 minutes
             self.minutes = int.from_bytes(data[6:8], "little") if cleaning else 0
             _LOGGER.debug(
                 "[bwt_cosmy] Status: %s, minutes=%d",
@@ -191,8 +189,8 @@ class CosmyCoordinator:
 
     def _push_update(self) -> None:
         """Emit dispatcher signals (runs in HA loop)."""
-        async_dispatcher_send(self.hass, self.sig_minutes, self.minutes)
-        async_dispatcher_send(self.hass, self.sig_state, self.cleaning, self.minutes)
+        async_dispatcher_send(self.hass, self.sig_minutes, self.minutes if self.available else None)
+        async_dispatcher_send(self.hass, self.sig_state, self.cleaning if self.available else None, self.minutes)
 
     # ---------------- Public operations ----------------
     async def async_refresh(self) -> None:
@@ -203,23 +201,24 @@ class CosmyCoordinator:
         async with self._lock:
             client = await self._ensure_client()
             if not client:
-                # Not connected → show 0 minutes
                 self.available = False
                 self.minutes = 0
                 self._push_update()
                 return
+
             try:
-                await client.start_notify(CHAR_NOTIFY, self._on_notify)
-                await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
-                await asyncio.sleep(NOTIFY_WAIT)
-                await client.stop_notify(CHAR_NOTIFY)
+                # Put a hard timeout on the whole BLE round-trip
+                async with asyncio.timeout(REFRESH_TIMEOUT):
+                    await client.start_notify(CHAR_NOTIFY, self._on_notify)
+                    await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
+                    await asyncio.sleep(NOTIFY_WAIT)
+                    await client.stop_notify(CHAR_NOTIFY)
                 self.available = True
-                # If no notify arrived, still push current cached state
                 self._push_update()
-            except Exception as e:
+            except (asyncio.TimeoutError, Exception) as e:
                 self.available = False
                 self.minutes = 0
-                _LOGGER.debug("[bwt_cosmy] refresh failed: %s", e)
+                _LOGGER.debug("[bwt_cosmy] refresh failed/timeout: %s", e)
                 try:
                     if self._client and self._client.is_connected:
                         await self._client.disconnect()
@@ -237,14 +236,17 @@ class CosmyCoordinator:
             self._push_update()
             return
         try:
-            await client.start_notify(CHAR_NOTIFY, self._on_notify)
-            # Optimistic UI: mark cleaning now (minutes unknown until status arrives)
-            self.cleaning = True
-            self._push_update()
-            await client.write_gatt_char(CHAR_WRITE, CMD_ON, response=True)
-            await asyncio.sleep(1.5)
-            await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
-            await asyncio.sleep(2.0)
+            async with asyncio.timeout(REFRESH_TIMEOUT):
+                await client.start_notify(CHAR_NOTIFY, self._on_notify)
+                # Optimistic UI
+                self.cleaning = True
+                self._push_update()
+                await client.write_gatt_char(CHAR_WRITE, CMD_ON, response=True)
+                await asyncio.sleep(1.5)
+                await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
+                await asyncio.sleep(2.0)
+        except (asyncio.TimeoutError, Exception) as e:
+            _LOGGER.debug("[bwt_cosmy] start_cleaning failed/timeout: %s", e)
         finally:
             try:
                 await client.stop_notify(CHAR_NOTIFY)
@@ -260,15 +262,18 @@ class CosmyCoordinator:
             self._push_update()
             return
         try:
-            await client.start_notify(CHAR_NOTIFY, self._on_notify)
-            # Optimistic UI: mark idle now and expose 0 minutes
-            self.cleaning = False
-            self.minutes = 0
-            self._push_update()
-            await client.write_gatt_char(CHAR_WRITE, CMD_OFF, response=True)
-            await asyncio.sleep(0.8)
-            await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
-            await asyncio.sleep(1.5)
+            async with asyncio.timeout(REFRESH_TIMEOUT):
+                await client.start_notify(CHAR_NOTIFY, self._on_notify)
+                # Optimistic UI
+                self.cleaning = False
+                self.minutes = 0
+                self._push_update()
+                await client.write_gatt_char(CHAR_WRITE, CMD_OFF, response=True)
+                await asyncio.sleep(0.8)
+                await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
+                await asyncio.sleep(1.5)
+        except (asyncio.TimeoutError, Exception) as e:
+            _LOGGER.debug("[bwt_cosmy] stop_cleaning failed/timeout: %s", e)
         finally:
             try:
                 await client.stop_notify(CHAR_NOTIFY)

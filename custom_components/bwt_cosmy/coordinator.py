@@ -16,7 +16,7 @@ from homeassistant.helpers.dispatcher import (
 from bleak_retry_connector import establish_connection, BleakClientWithServiceCache
 
 from .const import (
-    SERVICE_UUID,  # not used explicitly but kept for reference
+    SERVICE_UUID,  # kept for reference
     CHAR_WRITE,
     CHAR_NOTIFY,
     CMD_ON,
@@ -29,16 +29,14 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Periodic reconnection + status polling interval
-REFRESH_INTERVAL = timedelta(seconds=30)
-# Wait time after sending CMD_STAT to collect notify frames
-NOTIFY_WAIT = 1.0
+REFRESH_INTERVAL = timedelta(seconds=30)  # periodic reconnect + status
+NOTIFY_WAIT = 1.0                        # wait after CMD_STAT to collect notify
 
 
 class CosmyCoordinator:
     """Centralizes BLE (re)connection and status parsing for the Cosmy robot.
 
-    Thread-safety: all HA state updates and dispatcher signals are emitted
+    Thread-safety: all dispatcher sends and HA state changes originate
     from the Home Assistant event loop. Bleak callbacks bounce to the loop
     using hass.loop.call_soon_threadsafe.
     """
@@ -60,21 +58,18 @@ class CosmyCoordinator:
         key = self.address.replace(":", "").lower()
         self.sig_state = SIGNAL_STATE_FMT.format(addr=key)     # payload: (cleaning: Optional[bool], minutes: int)
         self.sig_minutes = SIGNAL_MINUTES_FMT.format(addr=key) # payload: (minutes: int)
-        self.sig_refresh = SIGNAL_REFRESH_FMT.format(addr=key) # sensor requests refresh
+        self.sig_refresh = SIGNAL_REFRESH_FMT.format(addr=key) # sensor/switch can request a refresh
         self._unsub_refresh = None
 
     # ---------------- Lifecycle ----------------
     async def async_start(self) -> None:
         """Start periodic refresh and register on-demand refresh listener."""
-        # On-demand refresh (requested by entities)
         self._unsub_refresh = async_dispatcher_connect(
             self.hass, self.sig_refresh, self._on_refresh_request
         )
-        # Periodic reconnection/status
         self._unsub_timer = async_track_time_interval(
             self.hass, self._scheduled_refresh, REFRESH_INTERVAL
         )
-        # Initial refresh now
         await self.async_refresh()
 
     async def async_stop(self) -> None:
@@ -97,8 +92,10 @@ class CosmyCoordinator:
         await self.async_refresh()
 
     def _on_refresh_request(self) -> None:
-        """Dispatcher callback from entities asking for a refresh."""
-        self.hass.async_create_task(self.async_refresh())
+        """Dispatcher callback (may be from non-HA thread) -> schedule safely on HA loop."""
+        self.hass.loop.call_soon_threadsafe(
+            lambda: self.hass.async_create_task(self.async_refresh())
+        )
 
     # ---------------- BLE helpers ----------------
     async def _ensure_client(self) -> Optional[BleakClientWithServiceCache]:
@@ -106,14 +103,9 @@ class CosmyCoordinator:
         if self._client and self._client.is_connected:
             return self._client
 
-        # Try connectable first; fallback to non-connectable adverts from proxies
-        ble_device = bluetooth.async_ble_device_from_address(
-            self.hass, self.address, connectable=True
-        )
+        ble_device = bluetooth.async_ble_device_from_address(self.hass, self.address, connectable=True)
         if ble_device is None:
-            ble_device = bluetooth.async_ble_device_from_address(
-                self.hass, self.address, connectable=False
-            )
+            ble_device = bluetooth.async_ble_device_from_address(self.hass, self.address, connectable=False)
 
         if ble_device is None:
             self.available = False
@@ -121,19 +113,17 @@ class CosmyCoordinator:
             return None
 
         try:
-            # Use explicit keyword args for HA recent versions
             self._client = await establish_connection(
                 client_class=BleakClientWithServiceCache,
                 device=ble_device,
                 name=self.address,
             )
-            # Disconnection callback -> bounce to HA loop
             try:
+                # bounce disconnect into HA loop
                 self._client.set_disconnected_callback(
                     lambda _c: self.hass.loop.call_soon_threadsafe(self._on_disconnect)
                 )
             except Exception:
-                # Not all backends support it; not fatal
                 pass
 
             self.available = True
@@ -176,7 +166,7 @@ class CosmyCoordinator:
         self._push_update()
 
     def _parse_status(self, data: bytes) -> Optional[bool]:
-        """Parse 20-byte status frame: header ffa53a1384, bit7 at [5] is cleaning, minutes is LE [6:8]."""
+        """Parse 20-byte status frame: header ffa53a1384, bit7 at [5] is cleaning, minutes LE [6:8]."""
         if len(data) == 20 and data[:5] == bytes.fromhex("ffa53a1384"):
             cleaning = bool(data[5] & 0x80)
             self.cleaning = cleaning

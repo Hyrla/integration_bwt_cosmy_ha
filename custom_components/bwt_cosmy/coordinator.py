@@ -47,7 +47,7 @@ class CosmyCoordinator:
         self.name = name
 
         self._client: Optional[BleakClientWithServiceCache] = None
-        self.cleaning: Optional[bool] = None
+        self.cleaning: Optional[bool] = None  # True/False/None(unknown)
         self.minutes: int = 0
         self.available: bool = False
 
@@ -87,6 +87,9 @@ class CosmyCoordinator:
                 pass
         self._client = None
         self.available = False
+        # If the integration is being unloaded, consider minutes = 0
+        self.minutes = 0
+        self._push_update()
 
     async def _scheduled_refresh(self, _now) -> None:
         await self.async_refresh()
@@ -109,6 +112,8 @@ class CosmyCoordinator:
 
         if ble_device is None:
             self.available = False
+            # Out of range → present minutes as 0
+            self.minutes = 0
             _LOGGER.debug("[bwt_cosmy] BLEDevice %s not found (out of range/proxy)", self.address)
             return None
 
@@ -131,6 +136,7 @@ class CosmyCoordinator:
             return self._client
         except Exception as e:
             self.available = False
+            self.minutes = 0
             _LOGGER.debug("[bwt_cosmy] GATT connect failed -> %s (%s)", self.address, e)
             return None
 
@@ -139,6 +145,8 @@ class CosmyCoordinator:
         _LOGGER.debug("[bwt_cosmy] GATT disconnected -> %s", self.address)
         self._client = None
         self.available = False
+        # When disconnected, we expose 0 minute remaining
+        self.minutes = 0
         self._push_update()
 
     # ---------------- Notify handling (thread-safe) ----------------
@@ -170,6 +178,7 @@ class CosmyCoordinator:
         if len(data) == 20 and data[:5] == bytes.fromhex("ffa53a1384"):
             cleaning = bool(data[5] & 0x80)
             self.cleaning = cleaning
+            # When idle, always report 0 minutes
             self.minutes = int.from_bytes(data[6:8], "little") if cleaning else 0
             _LOGGER.debug(
                 "[bwt_cosmy] Status: %s, minutes=%d",
@@ -194,7 +203,9 @@ class CosmyCoordinator:
         async with self._lock:
             client = await self._ensure_client()
             if not client:
+                # Not connected → show 0 minutes
                 self.available = False
+                self.minutes = 0
                 self._push_update()
                 return
             try:
@@ -207,6 +218,7 @@ class CosmyCoordinator:
                 self._push_update()
             except Exception as e:
                 self.available = False
+                self.minutes = 0
                 _LOGGER.debug("[bwt_cosmy] refresh failed: %s", e)
                 try:
                     if self._client and self._client.is_connected:
@@ -221,11 +233,12 @@ class CosmyCoordinator:
         client = await self._ensure_client()
         if not client:
             self.available = False
+            self.minutes = 0
             self._push_update()
             return
         try:
             await client.start_notify(CHAR_NOTIFY, self._on_notify)
-            # Optimistic UI: mark cleaning now
+            # Optimistic UI: mark cleaning now (minutes unknown until status arrives)
             self.cleaning = True
             self._push_update()
             await client.write_gatt_char(CHAR_WRITE, CMD_ON, response=True)
@@ -243,11 +256,12 @@ class CosmyCoordinator:
         client = await self._ensure_client()
         if not client:
             self.available = False
+            self.minutes = 0
             self._push_update()
             return
         try:
             await client.start_notify(CHAR_NOTIFY, self._on_notify)
-            # Optimistic UI: mark idle now
+            # Optimistic UI: mark idle now and expose 0 minutes
             self.cleaning = False
             self.minutes = 0
             self._push_update()

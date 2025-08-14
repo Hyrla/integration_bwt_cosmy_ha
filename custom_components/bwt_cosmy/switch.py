@@ -24,7 +24,6 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
-    """Créer l'entité switch à partir de l'entrée de config."""
     address = (entry.unique_id or entry.data.get(CONF_ADDRESS) or "").strip()
     name = entry.data.get(CONF_NAME) or "BWT Cosmy"
 
@@ -32,10 +31,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         _LOGGER.error("[%s] Pas d'adresse BLE dans l'entrée; aucune entité créée", DOMAIN)
         return
 
-    _LOGGER.debug("[%s] async_setup_entry pour %s (%s)", DOMAIN, name, address)
     ent = BwtCosmySwitch(hass, entry, address, name)
     async_add_entities([ent], update_before_add=False)
-    _LOGGER.debug("[%s] Entité switch ajoutée (update_before_add=False)", DOMAIN)
+    _LOGGER.debug("[%s] Entité switch ajoutée pour %s (%s)", DOMAIN, name, address)
 
 
 class BwtCosmySwitch(SwitchEntity):
@@ -47,34 +45,28 @@ class BwtCosmySwitch(SwitchEntity):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, address: str, name: str) -> None:
         self.hass = hass
         self.entry = entry
-        self._address = address
+        self._address = address.upper()
         self._client: Optional[BleakClientWithServiceCache] = None
         self._is_on: Optional[bool] = None
         self._minutes: int = 0
 
-        # Nom & identifiants
         self._attr_name = f"{name} Power"
-        self._attr_unique_id = f"{DOMAIN}_{address.replace(':','').lower()}"
-
-        # Rattache clairement au device via la connexion Bluetooth (visible dans l'arbre BT de HA)
+        self._attr_unique_id = f"{DOMAIN}_{self._address.replace(':','').lower()}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
-            connections={(dr.CONNECTION_BLUETOOTH, address.upper())},
+            connections={(dr.CONNECTION_BLUETOOTH, self._address)},
             name=name,
             manufacturer="BWT",
             model="Cosmy",
         )
-
-        # Par défaut, indisponible tant que la première comm n'a pas réussi
         self._attr_available = False
-        _LOGGER.debug("[%s] BwtCosmySwitch __init__ terminé pour %s", DOMAIN, address)
 
-    # ---------- Initialisation : premier refresh dès l’ajout ----------
+    # ---------- Initialisation : faire un vrai refresh synchrone ----------
     async def async_added_to_hass(self) -> None:
-        """Lancer un premier rafraîchissement au moment où l'entité est ajoutée."""
-        self.hass.async_create_task(self._initial_refresh())
+        await self._initial_refresh()
 
     async def _initial_refresh(self) -> None:
+        _LOGGER.debug("[%s] Initial refresh pour %s", DOMAIN, self._address)
         client = await self._ensure_client()
         if not client:
             self._attr_available = False
@@ -87,7 +79,7 @@ class BwtCosmySwitch(SwitchEntity):
             await asyncio.sleep(1.0)
             await client.stop_notify(CHAR_NOTIFY)
             self._attr_available = True
-            _LOGGER.debug("[%s] Initial refresh OK", DOMAIN)
+            _LOGGER.debug("[%s] Initial refresh OK (connecté)", DOMAIN)
         except Exception as e:
             self._attr_available = False
             _LOGGER.debug("[%s] Initial refresh KO: %s", DOMAIN, e)
@@ -99,14 +91,25 @@ class BwtCosmySwitch(SwitchEntity):
         if self._client and self._client.is_connected:
             return self._client
 
-        # Résout le BLEDevice via la stack Bluetooth de HA (proxy inclus)
+        # 1) Essai en connectable=True
         ble_device = bluetooth.async_ble_device_from_address(
             self.hass, self._address, connectable=True
         )
         if ble_device is None:
+            _LOGGER.debug("[%s] Pas de BLEDevice connectable pour %s; 2e essai connectable=False",
+                          DOMAIN, self._address)
+            # 2) Certains proxys remontent l'annonce non-connectable
+            ble_device = bluetooth.async_ble_device_from_address(
+                self.hass, self._address, connectable=False
+            )
+
+        if ble_device is None:
             self._attr_available = False
-            _LOGGER.debug("[%s] BLEDevice %s introuvable (hors de portée/proxy)", DOMAIN, self._address)
+            _LOGGER.debug("[%s] BLEDevice %s introuvable (même non-connectable)", DOMAIN, self._address)
             return None
+
+        _LOGGER.debug("[%s] BLEDevice résolu: %s (connectable=%s)",
+                      DOMAIN, ble_device, getattr(ble_device, "details", None))
 
         try:
             self._client = await establish_connection(
@@ -114,13 +117,12 @@ class BwtCosmySwitch(SwitchEntity):
                 ble_device=ble_device,
                 name=self._address,
             )
-            # Dès que la connexion GATT est ouverte, on marque l'entité disponible
             self._attr_available = True
-            _LOGGER.debug("[%s] Connexion BLE OK -> %s", DOMAIN, self._address)
+            _LOGGER.debug("[%s] Connexion GATT OK -> %s", DOMAIN, self._address)
             return self._client
         except Exception as e:
             self._attr_available = False
-            _LOGGER.debug("[%s] Connexion BLE KO -> %s (%s)", DOMAIN, self._address, e)
+            _LOGGER.debug("[%s] Connexion GATT KO -> %s (%s)", DOMAIN, self._address, e)
             return None
 
     # ---------- Parsing statut ----------

@@ -10,9 +10,16 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
-from .const import DOMAIN, CONF_ADDRESS, CONF_NAME, DATA_COORDINATOR, SIGNAL_STATE_FMT
+from .const import (
+    DOMAIN,
+    CONF_ADDRESS,
+    CONF_NAME,
+    DATA_COORDINATOR,
+    SIGNAL_STATE_FMT,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
@@ -34,7 +41,11 @@ class BwtCosmySwitch(SwitchEntity):
         self.entry = entry
         self.coordinator = coord
         self.address = address
-        self._attr_name = f"{name} Cleaning"
+
+        # Let HA compose "<device name>: <translated entity name>"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "cleaning"
+
         self._attr_unique_id = f"{DOMAIN}_{address.replace(':','').lower()}"
         self._attr_available = coord.available
 
@@ -54,6 +65,7 @@ class BwtCosmySwitch(SwitchEntity):
         self._unsub_state = None
 
     async def async_added_to_hass(self) -> None:
+        # Listen to state pushed by the coordinator (already on HA loop)
         self._unsub_state = async_dispatcher_connect(
             self.hass, self._signal_state, self._on_state
         )
@@ -64,10 +76,14 @@ class BwtCosmySwitch(SwitchEntity):
             self._unsub_state = None
 
     def _on_state(self, cleaning: Optional[bool], minutes: int) -> None:
+        """Dispatcher callback — ensure state write happens on HA loop."""
         self._is_on = cleaning
         self._minutes = minutes
         self._attr_available = self.coordinator.available
-        self.async_write_ha_state()
+        try:
+            self.hass.loop.call_soon_threadsafe(lambda: self.async_write_ha_state())
+        except Exception:
+            self.hass.async_create_task(self.async_update_ha_state())
 
     # ---------- Switch API ----------
     @property

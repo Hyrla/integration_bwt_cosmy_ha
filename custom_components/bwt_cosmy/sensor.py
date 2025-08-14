@@ -11,11 +11,16 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 
 from .const import (
-    DOMAIN, CONF_ADDRESS, CONF_NAME, DATA_COORDINATOR,
-    SIGNAL_MINUTES_FMT, SIGNAL_REFRESH_FMT,
+    DOMAIN,
+    CONF_ADDRESS,
+    CONF_NAME,
+    DATA_COORDINATOR,
+    SIGNAL_MINUTES_FMT,
+    SIGNAL_REFRESH_FMT,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
@@ -28,7 +33,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
 
 class CosmyMinutesSensor(SensorEntity):
-    """Remaining cleaning minutes read from BLE via the shared coordinator."""
+    """Remaining cleaning minutes read via the shared BLE coordinator."""
 
     _attr_icon = "mdi:clock-outline"
     _attr_native_unit_of_measurement = "min"
@@ -38,10 +43,12 @@ class CosmyMinutesSensor(SensorEntity):
         self.coordinator = coord
         self.address = address
         self._minutes: Optional[int] = coord.minutes if coord.minutes else 0
-        self._attr_name = f"{name} Cleaning Minutes"
-        self._attr_unique_id = f"{DOMAIN}_{address.replace(':','').lower()}_minutes"
-        self._attr_available = coord.available
 
+        # Let HA compose "<device name>: <translated entity name>"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "cleaning_minutes"
+
+        # Device info (bind to the same device as the switch)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{DOMAIN}_{address.replace(':','').lower()}")},
             connections={(dr.CONNECTION_BLUETOOTH, address)},
@@ -50,17 +57,20 @@ class CosmyMinutesSensor(SensorEntity):
             model="Cosmy",
         )
 
+        self._attr_available = coord.available
+
+        # Dispatcher plumbing
         key = self.address.replace(":", "").lower()
         self._signal_minutes = SIGNAL_MINUTES_FMT.format(addr=key)
         self._signal_refresh = SIGNAL_REFRESH_FMT.format(addr=key)
         self._unsub_minutes = None
 
     async def async_added_to_hass(self) -> None:
-        # Subscribe to minutes updates
+        # Subscribe to minutes updates (from coordinator, on HA loop after thread-safe bounce)
         self._unsub_minutes = async_dispatcher_connect(
             self.hass, self._signal_minutes, self._on_minutes
         )
-        # Request an immediate refresh to get an up-to-date value at startup
+        # Ask an immediate refresh so UI gets a fresh value at startup
         async_dispatcher_send(self.hass, self._signal_refresh)
 
     async def async_will_remove_from_hass(self) -> None:
@@ -69,9 +79,14 @@ class CosmyMinutesSensor(SensorEntity):
             self._unsub_minutes = None
 
     def _on_minutes(self, minutes: int) -> None:
+        """Dispatcher callback — ensure state write happens on HA loop."""
         self._minutes = int(minutes)
         self._attr_available = self.coordinator.available
-        self.async_write_ha_state()
+        try:
+            self.hass.loop.call_soon_threadsafe(lambda: self.async_write_ha_state())
+        except Exception:
+            # Fallback (should be rare)
+            self.hass.async_create_task(self.async_update_ha_state())
 
     @property
     def native_value(self) -> int | None:

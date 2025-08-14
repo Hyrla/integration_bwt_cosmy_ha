@@ -5,7 +5,7 @@
         "title": "BWT Cosmy",
         "description": "Entrez l'adresse MAC BLE du robot (fonctionne avec les proxys Bluetooth).",
         "data": {
-          "address": "Adresse BLE (ex : 48:70:1E:67:3E:55)",
+          "address": "Adresse MAC (ex : 48:70:1E:67:3E:55)",
           "name": "Nom de l'appareil"
         }
       }

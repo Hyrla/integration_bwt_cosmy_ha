@@ -1,7 +1,7 @@
 {
   "domain": "bwt_cosmy",
   "name": "BWT Cosmy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "codeowners": ["@Hyrla"],
   "integration_type": "hub",
   "dependencies": ["bluetooth_adapters"],

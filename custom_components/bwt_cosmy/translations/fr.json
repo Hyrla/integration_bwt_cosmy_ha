@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "BWT Cosmy",
-        "description": "Entrez l'adresse MAC BLE du robot (fonctionne via les proxys Bluetooth).",
+        "description": "Entrez l'adresse MAC BLE du robot (fonctionne avec les proxys Bluetooth).",
         "data": {
           "address": "Adresse BLE (ex : 48:70:1E:67:3E:55)",
           "name": "Nom de l'appareil"
@@ -12,6 +12,18 @@
     },
     "error": {
       "invalid_address": "Adresse invalide"
+    }
+  },
+  "entity": {
+    "switch": {
+      "cleaning": {
+        "name": "Nettoyage"
+      }
+    },
+    "sensor": {
+      "cleaning_minutes": {
+        "name": "Minutes restantes de nettoyage"
+      }
     }
   }
 }

@@ -38,3 +38,5 @@ BWT Cosmy robot cleaner integration for Home Assistant through Bluetooth.
 
 ## AI usage disclaimer
 This integration was developed with the help of AI tools.
+
+*Edit: it was 100% vibe coded*

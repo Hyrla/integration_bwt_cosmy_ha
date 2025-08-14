@@ -12,7 +12,8 @@ from homeassistant.components import bluetooth  # HA bluetooth helpers
 from bleak_retry_connector import establish_connection, BleakClientWithServiceCache
 
 import logging
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("custom_components.bwt_cosmy")
+_LOGGER.setLevel(logging.DEBUG)
 
 DOMAIN = "bwt_cosmy"
 

@@ -33,16 +33,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         return
 
     _LOGGER.debug("[%s] async_setup_entry pour %s (%s)", DOMAIN, name, address)
-    try:
-        ent = BwtCosmySwitch(hass, entry, address, name)
-        async_add_entities([ent], update_before_add=False)
-        _LOGGER.debug("[%s] Entité switch ajoutée (update_before_add=False)", DOMAIN)
-    except Exception as e:
-        _LOGGER.exception("[%s] Échec ajout entité switch: %s", DOMAIN, e)
+    ent = BwtCosmySwitch(hass, entry, address, name)
+    async_add_entities([ent], update_before_add=False)
+    _LOGGER.debug("[%s] Entité switch ajoutée (update_before_add=False)", DOMAIN)
 
 
 class BwtCosmySwitch(SwitchEntity):
-    """Switch ON/OFF + statut minutes en attribut."""
+    """Cosmy Power switch (ON/OFF) + minutes restantes en attribut."""
 
     _attr_icon = "mdi:robot-vacuum"
     _attr_should_poll = False
@@ -55,11 +52,11 @@ class BwtCosmySwitch(SwitchEntity):
         self._is_on: Optional[bool] = None
         self._minutes: int = 0
 
-        # Identités
+        # Nom & identifiants
         self._attr_name = f"{name} Power"
         self._attr_unique_id = f"{DOMAIN}_{address.replace(':','').lower()}"
 
-        # Rattacher clairement au device via "connections" BLE
+        # Rattache clairement au device via la connexion Bluetooth (visible dans l'arbre BT de HA)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
             connections={(dr.CONNECTION_BLUETOOTH, address.upper())},
@@ -68,15 +65,41 @@ class BwtCosmySwitch(SwitchEntity):
             model="Cosmy",
         )
 
-        # Hors de portée par défaut jusqu’à première comm
+        # Par défaut, indisponible tant que la première comm n'a pas réussi
         self._attr_available = False
         _LOGGER.debug("[%s] BwtCosmySwitch __init__ terminé pour %s", DOMAIN, address)
+
+    # ---------- Initialisation : premier refresh dès l’ajout ----------
+    async def async_added_to_hass(self) -> None:
+        """Lancer un premier rafraîchissement au moment où l'entité est ajoutée."""
+        self.hass.async_create_task(self._initial_refresh())
+
+    async def _initial_refresh(self) -> None:
+        client = await self._ensure_client()
+        if not client:
+            self._attr_available = False
+            self.async_write_ha_state()
+            _LOGGER.debug("[%s] Initial refresh: device hors de portée", DOMAIN)
+            return
+        try:
+            await client.start_notify(CHAR_NOTIFY, self._on_notify)
+            await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
+            await asyncio.sleep(1.0)
+            await client.stop_notify(CHAR_NOTIFY)
+            self._attr_available = True
+            _LOGGER.debug("[%s] Initial refresh OK", DOMAIN)
+        except Exception as e:
+            self._attr_available = False
+            _LOGGER.debug("[%s] Initial refresh KO: %s", DOMAIN, e)
+        finally:
+            self.async_write_ha_state()
 
     # ---------- Connexion BLE ----------
     async def _ensure_client(self) -> Optional[BleakClientWithServiceCache]:
         if self._client and self._client.is_connected:
             return self._client
 
+        # Résout le BLEDevice via la stack Bluetooth de HA (proxy inclus)
         ble_device = bluetooth.async_ble_device_from_address(
             self.hass, self._address, connectable=True
         )
@@ -91,6 +114,7 @@ class BwtCosmySwitch(SwitchEntity):
                 ble_device=ble_device,
                 name=self._address,
             )
+            # Dès que la connexion GATT est ouverte, on marque l'entité disponible
             self._attr_available = True
             _LOGGER.debug("[%s] Connexion BLE OK -> %s", DOMAIN, self._address)
             return self._client
@@ -101,7 +125,7 @@ class BwtCosmySwitch(SwitchEntity):
 
     # ---------- Parsing statut ----------
     def _parse_status(self, data: bytes) -> bool | None:
-        # 20 octets, header ffa53a1384, bit 7 de data[5] = ON
+        # 20 octets, header ffa53a1384 ; bit 7 de data[5] = ON
         if len(data) == 20 and data[:5] == bytes.fromhex("ffa53a1384"):
             is_on = bool(data[5] & 0x80)
             self._is_on = is_on
@@ -115,7 +139,7 @@ class BwtCosmySwitch(SwitchEntity):
         self._parse_status(bytes(payload))
         self._attr_available = True
 
-    # ---------- Switch API ----------
+    # ---------- API Switch ----------
     @property
     def is_on(self) -> bool | None:
         return self._is_on

@@ -112,6 +112,7 @@ class BwtCosmySwitch(SwitchEntity):
                       DOMAIN, ble_device, getattr(ble_device, "details", None))
 
         try:
+            # NB: cette forme par mots-clés marche dans HA récent
             self._client = await establish_connection(
                 client_class=BleakClientWithServiceCache,
                 device=ble_device,
@@ -124,6 +125,17 @@ class BwtCosmySwitch(SwitchEntity):
             self._attr_available = False
             _LOGGER.debug("[%s] Connexion GATT KO -> %s (%s)", DOMAIN, self._address, e)
             return None
+
+    # ---------- Helpers trames ----------
+    def _is_ack_frame(self, data: bytes) -> bool:
+        """Filtre les petits ACK non-statut vus dans tes logs."""
+        # 4 octets: 00 51 0c xx
+        if len(data) in (3, 4) and data[:2] == b"\x00\x51":
+            return True
+        # trames courtes finissant par 51 0c / 51 0c fd
+        if len(data) <= 12 and (data.endswith(b"\x51\x0c") or data.endswith(b"\x51\x0c\xfd")):
+            return True
+        return False
 
     # ---------- Parsing statut ----------
     def _parse_status(self, data: bytes) -> bool | None:
@@ -138,7 +150,11 @@ class BwtCosmySwitch(SwitchEntity):
         return None
 
     def _on_notify(self, _handle: int, payload: bytearray) -> None:
-        self._parse_status(bytes(payload))
+        b = bytes(payload)
+        if self._is_ack_frame(b):
+            _LOGGER.debug("[%s] ACK ignoré: %s", DOMAIN, b.hex())
+            return
+        self._parse_status(b)
         self._attr_available = True
 
     # ---------- API Switch ----------
@@ -156,12 +172,21 @@ class BwtCosmySwitch(SwitchEntity):
             self._attr_available = False
             self.async_write_ha_state()
             return
-        await client.write_gatt_char(CHAR_WRITE, CMD_ON, response=True)
+
+        # Écoute AVANT écriture + état optimiste immédiat
         await client.start_notify(CHAR_NOTIFY, self._on_notify)
-        await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
-        await asyncio.sleep(1.0)
-        await client.stop_notify(CHAR_NOTIFY)
+        self._is_on = True
+        self._attr_available = True
         self.async_write_ha_state()
+
+        await client.write_gatt_char(CHAR_WRITE, CMD_ON, response=True)
+        await asyncio.sleep(1.5)                 # laisse le robot basculer
+        await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
+        await asyncio.sleep(2.0)                 # temps pour recevoir la notif statut
+        try:
+            await client.stop_notify(CHAR_NOTIFY)
+        except Exception:
+            pass
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         client = await self._ensure_client()
@@ -169,12 +194,21 @@ class BwtCosmySwitch(SwitchEntity):
             self._attr_available = False
             self.async_write_ha_state()
             return
-        await client.write_gatt_char(CHAR_WRITE, CMD_OFF, response=True)
+
         await client.start_notify(CHAR_NOTIFY, self._on_notify)
-        await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
-        await asyncio.sleep(1.0)
-        await client.stop_notify(CHAR_NOTIFY)
+        # Optimiste immédiat
+        self._is_on = False
+        self._attr_available = True
         self.async_write_ha_state()
+
+        await client.write_gatt_char(CHAR_WRITE, CMD_OFF, response=True)
+        await asyncio.sleep(1.5)
+        await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
+        await asyncio.sleep(1.5)
+        try:
+            await client.stop_notify(CHAR_NOTIFY)
+        except Exception:
+            pass
 
     async def async_update(self) -> None:
         client = await self._ensure_client()
@@ -184,7 +218,7 @@ class BwtCosmySwitch(SwitchEntity):
         try:
             await client.start_notify(CHAR_NOTIFY, self._on_notify)
             await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(1.5)
             await client.stop_notify(CHAR_NOTIFY)
             self._attr_available = True
         except Exception as e:

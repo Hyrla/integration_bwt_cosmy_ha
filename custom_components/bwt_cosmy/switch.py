@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from .cosmy import CosmyClient
 from .const import DOMAIN
-from homeassistant.components.bluetooth import async_ble_client
+from homeassistant.components.bluetooth import async_bleak_client_from_service_info, BluetoothServiceInfoBleak
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,8 +18,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     timeout = entry.data.get("timeout", 20)
     # Récupère le service_info Bluetooth de Home Assistant
     bluetooth = hass.data[DOMAIN][entry.entry_id]["service_info"]
-    ble_device = bluetooth.device
-    ble_client = await async_ble_client(ble_device, hass)
+    ble_client = await async_bleak_client_from_service_info(hass, bluetooth)
     coordinator = CosmyCoordinator(hass, ble_client, timeout)
     await coordinator.async_config_entry_first_refresh()
     async_add_entities([CosmySwitch(coordinator, address, timeout)])

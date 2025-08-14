@@ -7,7 +7,7 @@
                 "description": "Entrez l'adresse BLE et le délai d'attente pour votre appareil Cosmy.",
                 "data": {
                     "address": "Adresse BLE (ex : AA:BB:CC:DD:EE:FF)",
-                    "timeout": "Délai d'attente (secondes)"
+                    "timeout": "Délai d'attente maximum (secondes)"
                 }
             }
         },
@@ -21,7 +21,7 @@
                 "title": "Options",
                 "description": "Ajustez les options pour votre appareil Cosmy.",
                 "data": {
-                    "timeout": "Délai d'attente (secondes)"
+                    "timeout": "Délai d'attente maximum (secondes)"
                 }
             }
         }

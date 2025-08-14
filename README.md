@@ -33,5 +33,9 @@ BWT Cosmy robot cleaner integration for Home Assistant through Bluetooth.
 - [GitHub](https://github.com/Hyrla/integration_bwt_cosmy_ha)
 - [Issue Tracker](https://github.com/Hyrla/integration_bwt_cosmy_ha/issues)
 
+## Supported Robot Models
+- BWT Cosmy 100
+- Other (if you have a different model, please report it)
+
 ## AI usage disclaimer
 This integration was developed with the help of AI tools.

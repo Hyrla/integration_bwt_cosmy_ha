@@ -6,8 +6,10 @@
                 "title": "Configure your Cosmy BLE device",
                 "description": "Enter the BLE address and timeout for your Cosmy device.",
                 "data": {
+                    "name": "Robot name",
+                    "model": "Robot model",
                     "address": "BLE Address (e.g. AA:BB:CC:DD:EE:FF)",
-                    "timeout": "Timeout (seconds)"
+                    "timeout": "Maximum timeout (seconds)"
                 }
             }
         },
@@ -21,7 +23,7 @@
                 "title": "Options",
                 "description": "Adjust options for your Cosmy device.",
                 "data": {
-                    "timeout": "Timeout (seconds)"
+                    "timeout": "Maximum timeout (seconds)"
                 }
             }
         }

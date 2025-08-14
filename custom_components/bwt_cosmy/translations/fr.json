@@ -6,6 +6,8 @@
                 "title": "Configurer votre appareil Cosmy BLE",
                 "description": "Entrez l'adresse BLE et le délai d'attente pour votre appareil Cosmy.",
                 "data": {
+                    "name": "Nom du robot",
+                    "model": "Modèle de robot",
                     "address": "Adresse BLE (ex : AA:BB:CC:DD:EE:FF)",
                     "timeout": "Délai d'attente maximum (secondes)"
                 }

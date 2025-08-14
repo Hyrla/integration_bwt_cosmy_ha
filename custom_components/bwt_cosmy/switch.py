@@ -70,8 +70,9 @@ class BwtCosmySwitch(SwitchEntity):
         ble_device = bluetooth.async_ble_device_from_address(
             self.hass, self._address, connectable=True
         )
+        _LOGGER.info(f"Recherche BLEDevice pour {self._address} (connectable=True) → {ble_device}")
         if ble_device is None:
-            _LOGGER.info(f"BLEDevice {self._address} introuvable ou hors de portée.")
+            _LOGGER.info(f"BLEDevice {self._address} introuvable ou hors de portée. L'entité reste indisponible, Home Assistant réessaiera automatiquement.")
             self._attr_available = False
             return None
 

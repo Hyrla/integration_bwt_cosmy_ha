@@ -1,2 +1,2 @@
-# integration_bwt_cosmy_ha
-BWT Cosmy robot cleaner integration for Home Assistant
+# Integration BWT Cosmy - Home Assistant
+BWT Cosmy robot cleaner integration for Home Assistant through Bluetooth.

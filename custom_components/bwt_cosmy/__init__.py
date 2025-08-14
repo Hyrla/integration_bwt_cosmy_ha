@@ -24,7 +24,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 	"""Set up BWT Cosmy from a config entry (UI)."""
 	_LOGGER.debug("Setting up BWT Cosmy config entry: %s", entry.entry_id)
-	hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {}
+	# Récupère le service_info Bluetooth depuis entry (stocké par le config flow)
+	service_info = entry.data.get("service_info")
+	hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"service_info": service_info}
 	await hass.config_entries.async_forward_entry_setups(entry, ["switch"])
 	return True
 

@@ -8,22 +8,26 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from .cosmy import CosmyClient
 from .const import DOMAIN
+from homeassistant.components.bluetooth import async_ble_client
 
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
-    """Set up Cosmy switch from a config entry."""
+    """Set up Cosmy switch from a config entry using Home Assistant BLE API."""
     address = entry.data["address"]
-    timeout = entry.data.get("timeout", 20.0)
-    coordinator = CosmyCoordinator(hass, address, timeout)
+    timeout = entry.data.get("timeout", 20)
+    # Récupère le service_info Bluetooth de Home Assistant
+    bluetooth = hass.data[DOMAIN][entry.entry_id]["service_info"]
+    ble_device = bluetooth.device
+    ble_client = await async_ble_client(ble_device, hass)
+    coordinator = CosmyCoordinator(hass, ble_client, timeout)
     await coordinator.async_config_entry_first_refresh()
     async_add_entities([CosmySwitch(coordinator, address, timeout)])
 
 class CosmyCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, address, timeout):
-        super().__init__(hass, _LOGGER, name=f"Cosmy {address}", update_interval=None)
-        self._client = CosmyClient(address, timeout)
-        self._address = address
+    def __init__(self, hass, ble_client, timeout):
+        super().__init__(hass, _LOGGER, name=f"Cosmy", update_interval=None)
+        self._client = CosmyClient(ble_client)
         self._timeout = timeout
 
     async def _async_update_data(self):

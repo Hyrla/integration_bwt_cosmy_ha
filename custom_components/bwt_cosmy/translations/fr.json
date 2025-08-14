@@ -22,7 +22,7 @@
     },
     "sensor": {
       "cleaning_minutes": {
-        "name": "Minutes restantes de nettoyage"
+        "name": "Temps restant"
       }
     }
   }

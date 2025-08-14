@@ -38,7 +38,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class CosmyMinutesSensor(SensorEntity):
     """Remaining cleaning minutes via the shared BLE coordinator.
 
-    Always available: shows 0 when idle or unreachable.
+    Availability mirrors the BLE connection:
+    - unavailable if robot/proxy is disconnected,
+    - when connected: 0 if idle, N>0 if cleaning.
     """
 
     _attr_icon = "mdi:clock-outline"
@@ -48,14 +50,17 @@ class CosmyMinutesSensor(SensorEntity):
     def __init__(self, coord, address: str, name: str) -> None:
         self.coordinator = coord
         self.address = address
-        # Default to 0 at startup
-        self._minutes: int = int(coord.minutes) if coord.minutes else 0
 
-        # Unique ID (required for persistent entity registration)
+        # minutes value (None when unavailable)
+        self._minutes: Optional[int] = (
+            int(coord.minutes) if coord.available else None
+        )
+
+        # Unique ID to persist the entity
         base = address.replace(":", "").lower()
         self._attr_unique_id = f"{DOMAIN}_{base}_minutes"
 
-        # Let HA compose "<device name>: <translated entity name>"
+        # Use translations: "<device name>: <translated entity name>"
         self._attr_has_entity_name = True
         self._attr_translation_key = "cleaning_minutes"
 
@@ -68,25 +73,20 @@ class CosmyMinutesSensor(SensorEntity):
             model="Cosmy",
         )
 
-        # Keep sensor available regardless of BLE connectivity
-        self._attr_available = True
+        # availability follows coordinator
+        self._attr_available = coord.available
 
         # Dispatcher plumbing
         self._signal_minutes = SIGNAL_MINUTES_FMT.format(addr=base)
         self._signal_refresh = SIGNAL_REFRESH_FMT.format(addr=base)
         self._unsub_minutes = None
 
-    # Always available
-    @property
-    def available(self) -> bool:  # type: ignore[override]
-        return True
-
     async def async_added_to_hass(self) -> None:
         # Subscribe to minutes pushed by the coordinator (already on HA loop)
         self._unsub_minutes = async_dispatcher_connect(
             self.hass, self._signal_minutes, self._on_minutes
         )
-        # Push initial state immediately so UI doesn't show unavailable
+        # Publish initial state (may be unavailable)
         self.async_write_ha_state()
         # Ask an immediate refresh for a fresh reading
         async_dispatcher_send(self.hass, self._signal_refresh)
@@ -97,15 +97,26 @@ class CosmyMinutesSensor(SensorEntity):
             self._unsub_minutes = None
 
     def _on_minutes(self, minutes: Optional[int]) -> None:
-        """Dispatcher callback — run state write on HA loop."""
-        self._minutes = int(minutes) if minutes is not None else 0
+        """Dispatcher callback — reflect coordinator availability and minutes."""
+        # Availability mirrors the coordinator
+        self._attr_available = self.coordinator.available
+
+        if not self._attr_available:
+            # When disconnected, show sensor as unavailable (value None)
+            self._minutes = None
+        else:
+            # Connected: if None (shouldn't happen), default to 0
+            self._minutes = int(minutes) if minutes is not None else 0
+
+        # Ensure state write happens on HA loop
         try:
             self.hass.loop.call_soon_threadsafe(self.async_write_ha_state)
         except Exception:
             self.hass.async_create_task(self.async_update_ha_state())
 
     @property
-    def native_value(self) -> int:
+    def native_value(self) -> Optional[int]:
+        # None when unavailable; otherwise minutes (0 when idle)
         return self._minutes
 
     async def async_update(self) -> None:

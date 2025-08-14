@@ -25,7 +25,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 	"""Set up BWT Cosmy from a config entry (UI)."""
 	_LOGGER.debug("Setting up BWT Cosmy config entry: %s", entry.entry_id)
 	hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {}
-	await hass.config_entries.async_forward_entry_setup(entry, "switch")
+	await hass.async_forward_entry_setup(entry, "switch")
 	return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -38,8 +38,8 @@ REFRESH_TIMEOUT = 5.0
 NOTIFY_WAIT = 1.0
 
 # Backoff after a failed refresh/connect (seconds)
-BACKOFF_START = 10
-BACKOFF_MAX = 120
+BACKOFF_START = 5
+BACKOFF_MAX = 60
 
 
 class CosmyCoordinator:

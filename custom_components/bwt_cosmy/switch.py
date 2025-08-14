@@ -114,8 +114,8 @@ class BwtCosmySwitch(SwitchEntity):
         try:
             self._client = await establish_connection(
                 BleakClientWithServiceCache,
-                ble_device=ble_device,
-                name=self._address,
+                ble_device,
+                self._address,
             )
             self._attr_available = True
             _LOGGER.debug("[%s] Connexion GATT OK -> %s", DOMAIN, self._address)

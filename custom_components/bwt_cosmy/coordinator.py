@@ -29,17 +29,24 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-REFRESH_INTERVAL = timedelta(seconds=30)   # periodic reconnect + status
-NOTIFY_WAIT = 1.0                          # wait after CMD_STAT to collect notify
-REFRESH_TIMEOUT = 5.0                      # hard timeout on a refresh cycle
+# Periodic reconnect + status
+REFRESH_INTERVAL = timedelta(seconds=45)
+
+# Hard timeouts (seconds)
+CONNECT_TIMEOUT = 6.0
+REFRESH_TIMEOUT = 5.0
+NOTIFY_WAIT = 1.0
+
+# Backoff after a failed refresh/connect (seconds)
+BACKOFF_START = 10
+BACKOFF_MAX = 120
 
 
 class CosmyCoordinator:
     """Centralizes BLE (re)connection and status parsing for the Cosmy robot.
 
-    Thread-safety: all dispatcher sends and HA state changes originate
-    from the Home Assistant event loop. Bleak callbacks bounce to the loop
-    using hass.loop.call_soon_threadsafe.
+    Thread-safety: all dispatcher sends happen from HA's event loop.
+    Bleak callbacks bounce into the HA loop via call_soon_threadsafe.
     """
 
     def __init__(self, hass: HomeAssistant, address: str, name: str) -> None:
@@ -55,11 +62,18 @@ class CosmyCoordinator:
         self._lock = asyncio.Lock()
         self._unsub_timer = None
 
+        # Queue a single trailing refresh if requests come while running
+        self._refresh_queued = False
+
+        # Backoff between retries after failures
+        self._backoff = BACKOFF_START
+        self._backoff_handle: Optional[asyncio.TimerHandle] = None
+
         # Per-device dispatcher signals
         key = self.address.replace(":", "").lower()
-        self.sig_state = SIGNAL_STATE_FMT.format(addr=key)     # payload: (cleaning: Optional[bool], minutes: int)
-        self.sig_minutes = SIGNAL_MINUTES_FMT.format(addr=key) # payload: (minutes: int)
-        self.sig_refresh = SIGNAL_REFRESH_FMT.format(addr=key) # sensor/switch can request a refresh
+        self.sig_state = SIGNAL_STATE_FMT.format(addr=key)
+        self.sig_minutes = SIGNAL_MINUTES_FMT.format(addr=key)
+        self.sig_refresh = SIGNAL_REFRESH_FMT.format(addr=key)
         self._unsub_refresh = None
 
     # ---------------- Lifecycle ----------------
@@ -71,7 +85,7 @@ class CosmyCoordinator:
         self._unsub_timer = async_track_time_interval(
             self.hass, self._scheduled_refresh, REFRESH_INTERVAL
         )
-        # IMPORTANT: do NOT await BLE here — just schedule it so HA can finish booting
+        # Do not block HA startup: schedule the first refresh
         self.hass.async_create_task(self.async_refresh())
 
     async def async_stop(self) -> None:
@@ -82,6 +96,9 @@ class CosmyCoordinator:
         if self._unsub_refresh:
             self._unsub_refresh()
             self._unsub_refresh = None
+        if self._backoff_handle:
+            self._backoff_handle.cancel()
+            self._backoff_handle = None
         if self._client and self._client.is_connected:
             try:
                 await self._client.disconnect()
@@ -96,10 +113,16 @@ class CosmyCoordinator:
         await self.async_refresh()
 
     def _on_refresh_request(self) -> None:
-        """Dispatcher callback (may be from non-HA thread) -> schedule safely on HA loop."""
-        self.hass.loop.call_soon_threadsafe(
-            lambda: self.hass.async_create_task(self.async_refresh())
-        )
+        """Dispatcher callback (may be off-loop) -> schedule safely on HA loop."""
+        self.hass.loop.call_soon_threadsafe(self._queue_or_run_refresh)
+
+    def _queue_or_run_refresh(self) -> None:
+        """If a refresh is running, queue one trailing run; else start now."""
+        if self._lock.locked():
+            self._refresh_queued = True
+            _LOGGER.debug("[bwt_cosmy] refresh in progress -> queue trailing refresh")
+            return
+        self.hass.async_create_task(self.async_refresh())
 
     # ---------------- BLE helpers ----------------
     async def _ensure_client(self) -> Optional[BleakClientWithServiceCache]:
@@ -107,9 +130,13 @@ class CosmyCoordinator:
         if self._client and self._client.is_connected:
             return self._client
 
-        ble_device = bluetooth.async_ble_device_from_address(self.hass, self.address, connectable=True)
+        ble_device = bluetooth.async_ble_device_from_address(
+            self.hass, self.address, connectable=True
+        )
         if ble_device is None:
-            ble_device = bluetooth.async_ble_device_from_address(self.hass, self.address, connectable=False)
+            ble_device = bluetooth.async_ble_device_from_address(
+                self.hass, self.address, connectable=False
+            )
 
         if ble_device is None:
             self.available = False
@@ -118,13 +145,15 @@ class CosmyCoordinator:
             return None
 
         try:
-            self._client = await establish_connection(
-                client_class=BleakClientWithServiceCache,
-                device=ble_device,
-                name=self.address,
-            )
+            # Guard against long internal retries with an overall timeout
+            async with asyncio.timeout(CONNECT_TIMEOUT):
+                self._client = await establish_connection(
+                    client_class=BleakClientWithServiceCache,
+                    device=ble_device,
+                    name=self.address,
+                )
             try:
-                # bounce disconnect into HA loop
+                # Bounce disconnect into HA loop
                 self._client.set_disconnected_callback(
                     lambda _c: self.hass.loop.call_soon_threadsafe(self._on_disconnect)
                 )
@@ -189,25 +218,40 @@ class CosmyCoordinator:
 
     def _push_update(self) -> None:
         """Emit dispatcher signals (runs in HA loop)."""
-        async_dispatcher_send(self.hass, self.sig_minutes, self.minutes if self.available else None)
-        async_dispatcher_send(self.hass, self.sig_state, self.cleaning if self.available else None, self.minutes)
+        async_dispatcher_send(
+            self.hass,
+            self.sig_minutes,
+            self.minutes if self.available else None,
+        )
+        async_dispatcher_send(
+            self.hass,
+            self.sig_state,
+            self.cleaning if self.available else None,
+            self.minutes,
+        )
 
     # ---------------- Public operations ----------------
     async def async_refresh(self) -> None:
-        """Attempt (re)connection and query status; safe against concurrent calls."""
+        """Attempt (re)connection and query status; deduplicated and timed out."""
         if self._lock.locked():
             _LOGGER.debug("[bwt_cosmy] refresh already in progress -> skip")
             return
         async with self._lock:
+            # Cancel any scheduled backoff when actively refreshing
+            if self._backoff_handle:
+                self._backoff_handle.cancel()
+                self._backoff_handle = None
+
             client = await self._ensure_client()
             if not client:
                 self.available = False
                 self.minutes = 0
                 self._push_update()
+                # schedule next try with backoff
+                self._schedule_backoff()
                 return
 
             try:
-                # Put a hard timeout on the whole BLE round-trip
                 async with asyncio.timeout(REFRESH_TIMEOUT):
                     await client.start_notify(CHAR_NOTIFY, self._on_notify)
                     await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
@@ -215,6 +259,8 @@ class CosmyCoordinator:
                     await client.stop_notify(CHAR_NOTIFY)
                 self.available = True
                 self._push_update()
+                # reset backoff after success
+                self._backoff = BACKOFF_START
             except (asyncio.TimeoutError, Exception) as e:
                 self.available = False
                 self.minutes = 0
@@ -226,14 +272,31 @@ class CosmyCoordinator:
                     pass
                 self._client = None
                 self._push_update()
+                self._schedule_backoff()
+            finally:
+                # Run a queued trailing refresh exactly once
+                if self._refresh_queued:
+                    self._refresh_queued = False
+                    self.hass.async_create_task(self.async_refresh())
+
+    def _schedule_backoff(self) -> None:
+        """Schedule a retry with exponential backoff (non-blocking)."""
+        delay = min(self._backoff, BACKOFF_MAX)
+        _LOGGER.debug("[bwt_cosmy] scheduling retry in %ss", delay)
+        self._backoff = min(self._backoff * 2, BACKOFF_MAX)
+        if self._backoff_handle:
+            self._backoff_handle.cancel()
+        self._backoff_handle = self.hass.loop.call_later(
+            delay, lambda: self.hass.async_create_task(self.async_refresh())
+        )
 
     async def async_start_cleaning(self) -> None:
-        """Send ON command; optimistic state updated immediately, then confirmed by status notify."""
         client = await self._ensure_client()
         if not client:
             self.available = False
             self.minutes = 0
             self._push_update()
+            self._schedule_backoff()
             return
         try:
             async with asyncio.timeout(REFRESH_TIMEOUT):
@@ -247,6 +310,7 @@ class CosmyCoordinator:
                 await asyncio.sleep(2.0)
         except (asyncio.TimeoutError, Exception) as e:
             _LOGGER.debug("[bwt_cosmy] start_cleaning failed/timeout: %s", e)
+            self._schedule_backoff()
         finally:
             try:
                 await client.stop_notify(CHAR_NOTIFY)
@@ -254,12 +318,12 @@ class CosmyCoordinator:
                 pass
 
     async def async_stop_cleaning(self) -> None:
-        """Send OFF command; optimistic state updated immediately, then confirmed by status notify."""
         client = await self._ensure_client()
         if not client:
             self.available = False
             self.minutes = 0
             self._push_update()
+            self._schedule_backoff()
             return
         try:
             async with asyncio.timeout(REFRESH_TIMEOUT):
@@ -274,6 +338,7 @@ class CosmyCoordinator:
                 await asyncio.sleep(1.5)
         except (asyncio.TimeoutError, Exception) as e:
             _LOGGER.debug("[bwt_cosmy] stop_cleaning failed/timeout: %s", e)
+            self._schedule_backoff()
         finally:
             try:
                 await client.stop_notify(CHAR_NOTIFY)

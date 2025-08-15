@@ -30,7 +30,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 # Periodic reconnect + status
-REFRESH_INTERVAL = timedelta(seconds=45)
+REFRESH_INTERVAL = timedelta(seconds=20)
 
 # Hard timeouts (seconds)
 CONNECT_TIMEOUT = 6.0
@@ -38,8 +38,8 @@ REFRESH_TIMEOUT = 5.0
 NOTIFY_WAIT = 1.0
 
 # Backoff after a failed refresh/connect (seconds)
-BACKOFF_START = 5
-BACKOFF_MAX = 60
+BACKOFF_START = 3
+BACKOFF_MAX = 30
 
 
 class CosmyCoordinator:

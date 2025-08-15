@@ -3,15 +3,23 @@
     "step": {
       "user": {
         "title": "BWT Cosmy",
-        "description": "Entrez l'adresse MAC BLE du robot (fonctionne avec les proxys Bluetooth).",
+        "description": "Entrez l'adresse MAC Bluetooth du robot.",
         "data": {
-          "address": "Adresse MAC (ex : 48:70:1E:67:3E:55)",
+          "address": "Adresse MAC (ex. 48:70:1E:67:3E:55)",
           "name": "Nom de l'appareil"
         }
+      },
+      "confirm": {
+        "title": "BWT Cosmy détecté",
+        "description": "Ajouter l'appareil détecté ?"
       }
     },
     "error": {
       "invalid_address": "Adresse invalide"
+    },
+    "abort": {
+      "already_configured": "Cet appareil est déjà configuré.",
+      "not_supported": "Appareil non pris en charge actuellement."
     }
   },
   "entity": {

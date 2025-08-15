@@ -1,7 +1,7 @@
 {
   "domain": "bwt_cosmy",
   "name": "BWT Cosmy",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "codeowners": ["@Hyrla"],
   "integration_type": "device",
   "dependencies": ["bluetooth"],
@@ -12,6 +12,9 @@
   "bluetooth": [
     {
       "local_name": "RoboCleaner*"
+    },
+    { 
+      "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb"
     }
   ]
 }

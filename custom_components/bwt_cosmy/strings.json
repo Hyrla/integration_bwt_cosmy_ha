@@ -3,15 +3,23 @@
     "step": {
       "user": {
         "title": "BWT Cosmy",
-        "description": "Enter the robot BLE MAC address (works via Bluetooth proxies).",
+        "description": "Enter the robot Bluetooth MAC address.",
         "data": {
           "address": "MAC address (e.g. 48:70:1E:67:3E:55)",
           "name": "Device name"
         }
+      },
+      "confirm": {
+        "title": "BWT Cosmy discovered",
+        "description": "Add the discovered device?"
       }
     },
     "error": {
       "invalid_address": "Invalid address"
+    },
+    "abort": {
+      "already_configured": "This device is already configured.",
+      "not_supported": "Device not currently present."
     }
   },
   "entity": {

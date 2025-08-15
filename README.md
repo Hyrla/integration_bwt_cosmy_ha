@@ -9,6 +9,7 @@ BWT Cosmy robot cleaner integration for Home Assistant through Bluetooth.
 - Status reporting (On/Off, cleaning time remaining)
 - UI-based setup (no YAML required)
 - Multi-language config flow (English, French)
+- Automatic discovery of the robot via Bluetooth
 
 ## Requirements
 - Home Assistant 2023.6 or newer recommended
@@ -17,9 +18,8 @@ BWT Cosmy robot cleaner integration for Home Assistant through Bluetooth.
 ## Installation
 1. Install [HACS](https://www.hacs.xyz/docs/use/download/download/) (if not already installed).
 2. Add `https://github.com/Hyrla/integration_bwt_cosmy_ha` as a custom repository on HACS and search for "BWT Cosmy" integration to install it.
-3. Go to **Settings > Devices & Services > Add Integration** and search for "BWT Cosmy".
-4. Enter your Cosmy BLE address (e.g. `AA:BB:CC:DD:EE:FF`)
-5. The Cosmy entity will appear in Home Assistant.
+3. Go to **Settings > Devices & Services**, your BWT Cosmy robot should appear automatically on top of the page if the Bluetooth adapter is working and in range.
+4. If it doesn't appear, you can manually add it by clicking on **Add Integration** and searching for "BWT Cosmy". Enter the robot's Bluetooth MAC address (e.g. `48:70:1E:67:3E:55`) and a name for the device.
 
 ## Usage
 - Use the switch entity to turn the robot ON or OFF.

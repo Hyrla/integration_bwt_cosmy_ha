@@ -28,7 +28,7 @@ BWT Cosmy robot cleaner integration for Home Assistant through Bluetooth.
 ## Troubleshooting
 - Make sure your Bluetooth adapter is working and accessible to Home Assistant.
 - The robot's station must be powered and in range. **The Cosmy Bluetooth antenna is really really weak**.
-- If you have issues, check the Home Assistant logs for errors from `bwt_cosmy`.
+- If you have issues, check the Home Assistant logs for errors from `bwt_cosmy`. (``cat home-assistant.log | grep bwt_cosmy``)
 
 ## Links
 - [GitHub](https://github.com/Hyrla/integration_bwt_cosmy_ha)

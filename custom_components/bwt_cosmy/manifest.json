@@ -1,19 +1,19 @@
 {
   "domain": "bwt_cosmy",
   "name": "BWT Cosmy",
-  "version": "0.1.6",
-  "codeowners": ["@Hyrla"],
-  "integration_type": "device",
-  "dependencies": ["bluetooth"],
-  "documentation": "https://github.com/Hyrla/integration_bwt_cosmy_ha",
-  "issue_tracker": "https://github.com/Hyrla/integration_bwt_cosmy_ha/issues",
-  "iot_class": "local_push",
-  "config_flow": true,
   "bluetooth": [
     { "local_name": "RoboCleaner*" },
     { "local_name": "RoboCleaner *" },
     { "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb" },
     { "service_uuid": "0000fff3-0000-1000-8000-00805f9b34fb" },
     { "service_uuid": "0000fff4-0000-1000-8000-00805f9b34fb" }
-  ]
+  ],
+  "codeowners": ["@Hyrla"],
+  "config_flow": true,
+  "dependencies": ["bluetooth"],
+  "documentation": "https://github.com/Hyrla/integration_bwt_cosmy_ha",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/Hyrla/integration_bwt_cosmy_ha/issues",
+  "version": "0.1.6"
 }

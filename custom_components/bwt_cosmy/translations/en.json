@@ -32,6 +32,11 @@
       "cleaning_minutes": {
         "name": "Time remaining"
       }
+    },
+    "binary_sensor": {
+      "in_water": {
+        "name": "In water"
+      }
     }
   }
 }

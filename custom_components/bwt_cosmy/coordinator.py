@@ -25,6 +25,7 @@ from .const import (
     SIGNAL_STATE_FMT,
     SIGNAL_MINUTES_FMT,
     SIGNAL_REFRESH_FMT,
+    SIGNAL_IN_WATER_FMT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ class CosmyCoordinator:
         self.sig_state = SIGNAL_STATE_FMT.format(addr=key)
         self.sig_minutes = SIGNAL_MINUTES_FMT.format(addr=key)
         self.sig_refresh = SIGNAL_REFRESH_FMT.format(addr=key)
+        self.sig_in_water = SIGNAL_IN_WATER_FMT.format(addr=key)
         self._unsub_refresh = None
 
     # ---------------- Lifecycle ----------------
@@ -107,6 +109,7 @@ class CosmyCoordinator:
         self._client = None
         self.available = False
         self.minutes = 0
+        self.in_water = None
         self._push_update()
 
     async def _scheduled_refresh(self, _now) -> None:
@@ -175,6 +178,7 @@ class CosmyCoordinator:
         self._client = None
         self.available = False
         self.minutes = 0
+        self.in_water = None
         self._push_update()
 
     # ---------------- Notify handling (thread-safe) ----------------
@@ -214,10 +218,12 @@ class CosmyCoordinator:
             self.minutes = int.from_bytes(data[6:8], "little") if cleaning else 0
             if self.minutes > 300:  # Should not happen, but guard against overflow
                 self.minutes = 0
+            self.in_water = any(b != 0 for b in data[16:20])
             _LOGGER.debug(
-                "[bwt_cosmy] Status: %s, minutes=%d",
+                "[bwt_cosmy] Status: %s, minutes=%d, in_water=%s",
                 "CLEANING" if cleaning else "IDLE",
                 self.minutes,
+                self.in_water,
             )
             return cleaning
         _LOGGER.debug("[bwt_cosmy] Unexpected frame: %s", data.hex())
@@ -235,6 +241,9 @@ class CosmyCoordinator:
             self.sig_state,
             self.cleaning if self.available else None,
             self.minutes,
+        )
+        async_dispatcher_send(
+            self.hass, self.sig_in_water, self.in_water if self.available else None
         )
 
     # ---------------- Public operations ----------------

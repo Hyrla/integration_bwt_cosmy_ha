@@ -7,7 +7,7 @@ from homeassistant.const import Platform
 from .const import DOMAIN, DATA_COORDINATOR
 from .coordinator import CosmyCoordinator
 
-PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.SENSOR, Platform.BINARY_SENSOR]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     address = (entry.unique_id or entry.data.get("address") or "").strip().upper()

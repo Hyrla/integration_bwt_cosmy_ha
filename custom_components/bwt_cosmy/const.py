@@ -19,4 +19,5 @@ DATA_COORDINATOR = "coordinator"
 # Dispatcher signal names (per-device)
 SIGNAL_STATE_FMT   = "bwt_cosmy_{addr}_state"    # payload: bool (cleaning) + minutes
 SIGNAL_MINUTES_FMT = "bwt_cosmy_{addr}_minutes"  # payload: int
+SIGNAL_IN_WATER_FMT = "bwt_cosmy_{addr}_in_water"  # payload: bool (in water)
 SIGNAL_REFRESH_FMT = "bwt_cosmy_{addr}_refresh"  # sensor can request a refresh

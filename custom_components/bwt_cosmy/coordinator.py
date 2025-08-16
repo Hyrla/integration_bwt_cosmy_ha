@@ -59,6 +59,7 @@ class CosmyCoordinator:
         self.cleaning: Optional[bool] = None  # True/False/None(unknown)
         self.minutes: int = 0
         self.available: bool = False
+        self.in_water: Optional[bool] = None  # <-- init
 
         self._lock = asyncio.Lock()
         self._unsub_timer = None
@@ -69,6 +70,9 @@ class CosmyCoordinator:
         # Backoff between retries after failures
         self._backoff = BACKOFF_START
         self._backoff_handle: Optional[asyncio.TimerHandle] = None
+
+        # Notify state (idempotent start/stop)
+        self._notify_active: bool = False  # <-- new flag
 
         # Per-device dispatcher signals
         key = self.address.replace(":", "").lower()
@@ -110,6 +114,7 @@ class CosmyCoordinator:
         self.available = False
         self.minutes = 0
         self.in_water = None
+        self._notify_active = False
         self._push_update()
 
     async def _scheduled_refresh(self, _now) -> None:
@@ -164,11 +169,13 @@ class CosmyCoordinator:
                 pass
 
             self.available = True
+            self._notify_active = False  # <-- reset on new connection
             _LOGGER.debug("[bwt_cosmy] GATT connected -> %s", self.address)
             return self._client
         except Exception as e:
             self.available = False
             self.minutes = 0
+            self._notify_active = False
             _LOGGER.debug("[bwt_cosmy] GATT connect failed -> %s (%s)", self.address, e)
             return None
 
@@ -179,7 +186,41 @@ class CosmyCoordinator:
         self.available = False
         self.minutes = 0
         self.in_water = None
+        self._notify_active = False  # <-- reset
         self._push_update()
+
+    # ---------- Idempotent notify helpers ----------
+    async def _safe_start_notify(self, client) -> None:
+        """Start notify unless already active."""
+        if self._notify_active:
+            return
+        try:
+            _LOGGER.debug("[bwt_cosmy] -> start_notify on %s", CHAR_NOTIFY)
+            await client.start_notify(CHAR_NOTIFY, self._on_notify)
+            self._notify_active = True
+        except Exception as e:
+            msg = str(e).lower()
+            if "already en" in msg or "already notifying" in msg:
+                _LOGGER.debug("[bwt_cosmy] start_notify already active, continue")
+                self._notify_active = True
+            else:
+                raise
+
+    async def _safe_stop_notify(self, client) -> None:
+        """Stop notify if active; ignore benign errors."""
+        if not self._notify_active:
+            return
+        try:
+            _LOGGER.debug("[bwt_cosmy] -> stop_notify on %s", CHAR_NOTIFY)
+            await client.stop_notify(CHAR_NOTIFY)
+        except Exception as e:
+            msg = str(e).lower()
+            if "not notifying" in msg or "not enabled" in msg:
+                _LOGGER.debug("[bwt_cosmy] stop_notify: not active, ignore")
+            else:
+                _LOGGER.debug("[bwt_cosmy] stop_notify error: %s", e)
+        finally:
+            self._notify_active = False
 
     # ---------------- Notify handling (thread-safe) ----------------
     def _on_notify(self, _handle: int, payload: bytearray) -> None:
@@ -269,13 +310,11 @@ class CosmyCoordinator:
 
             try:
                 async with asyncio.timeout(REFRESH_TIMEOUT):
-                    _LOGGER.debug("[bwt_cosmy] -> start_notify on %s", CHAR_NOTIFY)
-                    await client.start_notify(CHAR_NOTIFY, self._on_notify)
+                    await self._safe_start_notify(client)
                     _LOGGER.debug("[bwt_cosmy] -> CMD_STAT write: %s", CMD_STAT.hex())
                     await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
                     await asyncio.sleep(NOTIFY_WAIT)
-                    _LOGGER.debug("[bwt_cosmy] -> stop_notify on %s", CHAR_NOTIFY)
-                    await client.stop_notify(CHAR_NOTIFY)
+                    await self._safe_stop_notify(client)
                 self.available = True
                 self._push_update()
                 # reset backoff after success
@@ -290,6 +329,7 @@ class CosmyCoordinator:
                 except Exception:
                     pass
                 self._client = None
+                self._notify_active = False
                 self._push_update()
                 self._schedule_backoff()
             finally:
@@ -319,8 +359,7 @@ class CosmyCoordinator:
             return
         try:
             async with asyncio.timeout(REFRESH_TIMEOUT):
-                _LOGGER.debug("[bwt_cosmy] -> start_notify on %s", CHAR_NOTIFY)
-                await client.start_notify(CHAR_NOTIFY, self._on_notify)
+                await self._safe_start_notify(client)
                 # Optimistic UI
                 self.cleaning = True
                 self._push_update()
@@ -335,8 +374,7 @@ class CosmyCoordinator:
             self._schedule_backoff()
         finally:
             try:
-                _LOGGER.debug("[bwt_cosmy] -> stop_notify on %s", CHAR_NOTIFY)
-                await client.stop_notify(CHAR_NOTIFY)
+                await self._safe_stop_notify(client)
             except Exception:
                 pass
 
@@ -350,8 +388,7 @@ class CosmyCoordinator:
             return
         try:
             async with asyncio.timeout(REFRESH_TIMEOUT):
-                _LOGGER.debug("[bwt_cosmy] -> start_notify on %s", CHAR_NOTIFY)
-                await client.start_notify(CHAR_NOTIFY, self._on_notify)
+                await self._safe_start_notify(client)
                 # Optimistic UI
                 self.cleaning = False
                 self.minutes = 0
@@ -367,7 +404,6 @@ class CosmyCoordinator:
             self._schedule_backoff()
         finally:
             try:
-                _LOGGER.debug("[bwt_cosmy] -> stop_notify on %s", CHAR_NOTIFY)
-                await client.stop_notify(CHAR_NOTIFY)
+                await self._safe_stop_notify(client)
             except Exception:
                 pass

@@ -29,6 +29,8 @@ class BwtCosmyInWaterBinarySensor(BinarySensorEntity):
         self._attr_unique_id = f"{DOMAIN}_{address.replace(':','').lower()}_inwater"
         self._attr_is_on: Optional[bool] = None
         self._attr_available = False
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "in_water"
 
         self._signal = SIGNAL_IN_WATER_FMT.format(addr=address.replace(":","").lower())
 

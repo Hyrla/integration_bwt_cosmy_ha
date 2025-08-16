@@ -6,7 +6,7 @@ BWT Cosmy robot cleaner integration for Home Assistant through Bluetooth.
 ## Features
 - Control your BWT Cosmy robot via Bluetooth
 - On/Off switch entity
-- Status reporting (On/Off, cleaning time remaining)
+- Status reporting (On/Off, cleaning time remaining, in water)
 - UI-based setup (no YAML required)
 - Multi-language config flow (English, French)
 - Automatic discovery of the robot via Bluetooth

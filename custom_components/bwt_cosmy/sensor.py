@@ -57,8 +57,7 @@ class CosmyMinutesSensor(SensorEntity):
         )
 
         # Unique ID to persist the entity
-        base = address.replace(":", "").lower()
-        self._attr_unique_id = f"{DOMAIN}_{base}_minutes"
+        self._attr_unique_id = f"{DOMAIN}_{address.replace(':','').lower()}_minutes"
 
         # Use translations: "<device name>: <translated entity name>"
         self._attr_has_entity_name = True

@@ -25,7 +25,6 @@ class BwtCosmyInWaterBinarySensor(BinarySensorEntity):
     def __init__(self, coordinator, address: str, name: str) -> None:
         self._coord = coordinator
         self._address = address
-        self._attr_name = f"{name} In water"
         self._attr_unique_id = f"{DOMAIN}_{address.replace(':','').lower()}_inwater"
         self._attr_is_on: Optional[bool] = None
         self._attr_available = False

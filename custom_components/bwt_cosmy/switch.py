@@ -46,7 +46,7 @@ class BwtCosmySwitch(SwitchEntity):
         self._attr_has_entity_name = True
         self._attr_translation_key = "cleaning"
 
-        self._attr_unique_id = f"{DOMAIN}_{address.replace(':','').lower()}_clean"
+        self._attr_unique_id = f"{DOMAIN}_{address.replace(':','').lower()}"
         self._attr_available = coord.available
 
         self._is_on: Optional[bool] = coord.cleaning

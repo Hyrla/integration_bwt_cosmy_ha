@@ -181,6 +181,11 @@ class CosmyCoordinator:
     def _on_notify(self, _handle: int, payload: bytearray) -> None:
         """Bleak thread callback -> bounce into HA loop safely."""
         data = bytes(payload)
+        # >>> DEBUG RAW FRAME <<<
+        try:
+            _LOGGER.debug("[bwt_cosmy] RAW notify (len=%d): %s", len(data), data.hex())
+        except Exception:
+            pass
         self.hass.loop.call_soon_threadsafe(self._handle_notify, data)
 
     @staticmethod
@@ -207,7 +212,7 @@ class CosmyCoordinator:
             cleaning = bool(data[5] & 0x80)
             self.cleaning = cleaning
             self.minutes = int.from_bytes(data[6:8], "little") if cleaning else 0
-            if self.minutes > 300: # Should not happen, but guard against overflow
+            if self.minutes > 300:  # Should not happen, but guard against overflow
                 self.minutes = 0
             _LOGGER.debug(
                 "[bwt_cosmy] Status: %s, minutes=%d",
@@ -255,9 +260,12 @@ class CosmyCoordinator:
 
             try:
                 async with asyncio.timeout(REFRESH_TIMEOUT):
+                    _LOGGER.debug("[bwt_cosmy] -> start_notify on %s", CHAR_NOTIFY)
                     await client.start_notify(CHAR_NOTIFY, self._on_notify)
+                    _LOGGER.debug("[bwt_cosmy] -> CMD_STAT write: %s", CMD_STAT.hex())
                     await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
                     await asyncio.sleep(NOTIFY_WAIT)
+                    _LOGGER.debug("[bwt_cosmy] -> stop_notify on %s", CHAR_NOTIFY)
                     await client.stop_notify(CHAR_NOTIFY)
                 self.available = True
                 self._push_update()
@@ -302,12 +310,15 @@ class CosmyCoordinator:
             return
         try:
             async with asyncio.timeout(REFRESH_TIMEOUT):
+                _LOGGER.debug("[bwt_cosmy] -> start_notify on %s", CHAR_NOTIFY)
                 await client.start_notify(CHAR_NOTIFY, self._on_notify)
                 # Optimistic UI
                 self.cleaning = True
                 self._push_update()
+                _LOGGER.debug("[bwt_cosmy] -> CMD_ON write: %s", CMD_ON.hex())
                 await client.write_gatt_char(CHAR_WRITE, CMD_ON, response=True)
                 await asyncio.sleep(1.5)
+                _LOGGER.debug("[bwt_cosmy] -> CMD_STAT write: %s", CMD_STAT.hex())
                 await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
                 await asyncio.sleep(2.0)
         except (asyncio.TimeoutError, Exception) as e:
@@ -315,6 +326,7 @@ class CosmyCoordinator:
             self._schedule_backoff()
         finally:
             try:
+                _LOGGER.debug("[bwt_cosmy] -> stop_notify on %s", CHAR_NOTIFY)
                 await client.stop_notify(CHAR_NOTIFY)
             except Exception:
                 pass
@@ -329,13 +341,16 @@ class CosmyCoordinator:
             return
         try:
             async with asyncio.timeout(REFRESH_TIMEOUT):
+                _LOGGER.debug("[bwt_cosmy] -> start_notify on %s", CHAR_NOTIFY)
                 await client.start_notify(CHAR_NOTIFY, self._on_notify)
                 # Optimistic UI
                 self.cleaning = False
                 self.minutes = 0
                 self._push_update()
+                _LOGGER.debug("[bwt_cosmy] -> CMD_OFF write: %s", CMD_OFF.hex())
                 await client.write_gatt_char(CHAR_WRITE, CMD_OFF, response=True)
                 await asyncio.sleep(0.8)
+                _LOGGER.debug("[bwt_cosmy] -> CMD_STAT write: %s", CMD_STAT.hex())
                 await client.write_gatt_char(CHAR_WRITE, CMD_STAT, response=True)
                 await asyncio.sleep(1.5)
         except (asyncio.TimeoutError, Exception) as e:
@@ -343,6 +358,7 @@ class CosmyCoordinator:
             self._schedule_backoff()
         finally:
             try:
+                _LOGGER.debug("[bwt_cosmy] -> stop_notify on %s", CHAR_NOTIFY)
                 await client.stop_notify(CHAR_NOTIFY)
             except Exception:
                 pass

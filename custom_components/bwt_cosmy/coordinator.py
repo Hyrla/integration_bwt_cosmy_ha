@@ -207,6 +207,8 @@ class CosmyCoordinator:
             cleaning = bool(data[5] & 0x80)
             self.cleaning = cleaning
             self.minutes = int.from_bytes(data[6:8], "little") if cleaning else 0
+            if self.minutes > 300: # Should not happen, but guard against overflow
+                self.minutes = 0
             _LOGGER.debug(
                 "[bwt_cosmy] Status: %s, minutes=%d",
                 "CLEANING" if cleaning else "IDLE",

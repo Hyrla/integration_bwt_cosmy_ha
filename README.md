@@ -36,7 +36,7 @@ BWT Cosmy robot cleaner integration for Home Assistant through Bluetooth.
 
 ## Supported Robot Models
 - BWT Cosmy 200
-- Other (if you have a different model, please report it) *Cosmy 150, FSA1500 and FSA1800 may work, but I don't have them to test*
+- Other (if you have a different model, please report it) *FSA1800 may work, but I don't have it to test*
 
 ## AI usage disclaimer
 This integration was developed with the help of AI tools.
